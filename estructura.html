@@ -1,0 +1,127 @@
+                ┌───────────────────────────────────────────────┐
+                │                Config File                    │
+                │     (config.conf estilo NGINX)                │
+                │                                               │
+                │  - ports, host, root directories              │
+                │  - error pages                                │
+                │  - max body size                              │
+                │  - routes & rules                             │
+                │  - CGI / uploads / redirects / index.html     │
+                └───────────────────────────────────────────────┘
+                                      │
+                                      ▼
+                    ┌────────────────────────────────┐
+                    │     1️⃣ Inicialización del Servidor     │
+                    │                                        │
+                    │ - Parsear config.conf                  │
+                    │ - Crear sockets por cada host:port     │
+                    │ - Poner sockets en modo NON-BLOCKING   │
+                    │ - Asociarlos a poll()                  │
+                    └────────────────────────────────┘
+                                      │
+                                      ▼
+                    ┌────────────────────────────────┐
+                    │   2️⃣ Bucle principal con poll()       │
+                    │   (Solo UNO para todo)          │
+                    │--------------------------------│
+                    │  while (true):                 │
+                    │   → poll(fds)                  │
+                    │   → si hay actividad:          │
+                    │      - Nueva conexión? accept()│
+                    │      - Datos listos para leer? │
+                    │         → read() petición HTTP  │
+                    │      - Listo para escribir?     │
+                    │         → send() respuesta      │
+                    └────────────────────────────────┘
+                                      │
+                                      ▼
+                    ┌────────────────────────────────┐
+                    │     3️⃣ Procesamiento HTTP             │
+                    │--------------------------------│
+                    │ - Parsear la petición HTTP      │
+                    │ - Verificar método (GET, POST...)│
+                    │ - Buscar ruta en la configuración│
+                    │ - Decidir acción:               │
+                    │     → Servir archivo estático   │
+                    │     → Ejecutar CGI              │
+                    │     → Redirigir                 │
+                    │     → Retornar error page       │
+                    └────────────────────────────────┘
+                                      │
+                                      ▼
+           ┌─────────────────────────────────────────────────────────┐
+           │                   4️⃣ Tipos de respuesta HTTP               │
+           │─────────────────────────────────────────────────────────│
+           │ GET:    Leer archivo y enviarlo al cliente              │
+           │ POST:   Guardar datos (upload) o pasarlos al CGI        │
+           │ DELETE: Eliminar archivo solicitado                     │
+           │ Error:  Enviar página de error personalizada o default  │
+           └─────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+                    ┌────────────────────────────────┐
+                    │     5️⃣ Ejecución de CGI               │
+                    │--------------------------------│
+                    │ - Crear proceso con fork()      │
+                    │ - Configurar variables de entorno│
+                    │ - Enviar datos de la petición   │
+                    │ - Recibir salida del CGI (HTML) │
+                    │ - Mandar al cliente             │
+                    └────────────────────────────────┘
+                                      │
+                                      ▼
+                    ┌────────────────────────────────┐
+                    │     6️⃣ Envío de respuesta HTTP        │
+                    │--------------------------------│
+                    │ - Construir cabeceras HTTP      │
+                    │ - Mandar cuerpo (file/CGI/etc.) │
+                    │ - Cerrar o mantener conexión    │
+                    └────────────────────────────────┘
+                                      │
+                                      ▼
+                    ┌────────────────────────────────┐
+                    │     7️⃣ Limpieza & Desconexiones       │
+                    │--------------------------------│
+                    │ - Detectar cliente desconectado │
+                    │ - Liberar memoria / fds         │
+                    │ - Mantener server activo        │
+                    └────────────────────────────────┘
+
+
+
+
+                    ┌──────────────────────────────────────────────────────────────────────┐
+│                           MAIN PROGRAM                               │
+│  ./webserv config.conf                                               │
+│──────────────────────────────────────────────────────────────────────│
+│ 1️⃣ Cargar Configuración                                              │
+│     ↓                                                                │
+│  ConfigParser → lee config.conf                                      │
+│     ↓                                                                │
+│  Genera lista de "Servers" (host, puerto, rutas, reglas...)          │
+│──────────────────────────────────────────────────────────────────────│
+│ 2️⃣ Crear sockets de escucha (listen sockets)                        │
+│     ↓                                                                │
+│  ServerManager crea un socket por cada host:port                     │
+│  fcntl(fd, O_NONBLOCK) → modo no bloqueante                          │
+│  bind() + listen()                                                   │
+│     ↓                                                                │
+│  Añadir cada socket a poll()                                         │
+│──────────────────────────────────────────────────────────────────────│
+│ 3️⃣ Entrar en el bucle principal                                     │
+│  while (true) {                                                      │
+│     poll(fds, timeout);                                              │
+│                                                                      │
+│     for (cada fd con evento) {                                       │
+│        if (fd == socket de escucha) → accept() nueva conexión        │
+│             → ClienteManager crea nuevo cliente                      │
+│             → Añadir su fd a poll()                                  │
+│                                                                      │
+│        else if (fd es cliente con evento READ)                       │
+│             → RequestHandler.read(fd)                                │
+│                                                                      │
+│        else if (fd es cliente con evento WRITE)                      │
+│             → ResponseHandler.write(fd)                              │
+│     }                                                                │
+│  }                                                                   │
+└──────────────────────────────────────────────────────────────────────┘
